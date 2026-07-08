@@ -228,7 +228,9 @@ void init_bypassDyldLibValidation() {
 
     NSDebugLog(@"[DyldLVBypass] init");
     
-    switch ((int)DeviceGetJITFlags(YES)) {
+    int jitFlags = (int)DeviceGetJITFlags(YES);
+    jitFlags &= ~JIT_FLAG_IS_IOS_26; // don't care about this flag for now
+    switch (jitFlags) {
         case JIT_FLAG_FORCE_MIRRORED | JIT_FLAG_HAS_TXM:
             NSDebugLog(@"[DyldLVBypass] Using redirectFunctionMirrored");
             redirectFunction = redirectFunctionMirrored;
