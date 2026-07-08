@@ -26,6 +26,11 @@
 
 #include <dlfcn.h>
 
+// iOS 27 Graphics Fix forward declarations
+extern void iOS27_initializeGraphicsContext(void);
+extern void iOS27_fixCAMetalLayerRendering(CALayer *layer);
+extern void iOS27_warmupSurfaceViewIfNeeded(UIView *surfaceView);
+
 int memorystatus_control(uint32_t command, int32_t pid, uint32_t flags, void *buffer, size_t buffersize);
 #define MEMORYSTATUS_CMD_SET_JETSAM_TASK_LIMIT        6
 
@@ -131,6 +136,10 @@ static GameSurfaceView* pojavWindow;
 
     [self performSelector:@selector(setupCategory_Navigation)];
 
+    // iOS 27 Graphics Fix: Initialize Metal context early
+    if (@available(iOS 27.0, *)) {
+        iOS27_initializeGraphicsContext();
+    }
     
     UIHoverGestureRecognizer *hoverGesture = [[NSClassFromString(@"UIHoverGestureRecognizer") alloc] initWithTarget:self action:@selector(surfaceOnHover:)];
     [self.touchView addGestureRecognizer:hoverGesture];
@@ -388,6 +397,11 @@ static GameSurfaceView* pojavWindow;
         --windowHeight;
     }
     CallbackBridge_nativeSendScreenSize(windowWidth, windowHeight);
+
+    // iOS 27 Graphics Fix: Fix CAMetalLayer rendering after resolution change
+    if (@available(iOS 27.0, *)) {
+        iOS27_fixCAMetalLayerRendering(self.surfaceView.layer);
+    }
 }
 
 - (void)updateControlHiddenState:(BOOL)hide {
@@ -431,6 +445,12 @@ static GameSurfaceView* pojavWindow;
         if (minVersion == 0) {
             minVersion = [self.metadata[@"javaVersion"][@"version"] intValue];
         }
+
+        // iOS 27 Graphics Fix: Warmup surface view before launching JVM
+        if (@available(iOS 27.0, *)) {
+            iOS27_warmupSurfaceViewIfNeeded(self.surfaceView);
+        }
+
         launchJVM(
             BaseAuthenticator.current.authData[@"username"],
             self.metadata,
@@ -1000,59 +1020,22 @@ int touchesMovedCount;
     }
 }
 
-// Equals to Android ACTION_MOVE
-- (void)touchesMoved:(NSSet *)touches withEvent:(UIEvent *)event
-{
-    [super touchesMoved:touches withEvent:event];
-
+- (void)touchesMoved:(NSSet *)touches withEvent:(UIEvent *)event {
     for (UITouch *touch in touches) {
-        if (touch.type == UITouchTypeIndirectPointer) {
-            if (!isGrabbing && !virtualMouseEnabled) {
-                CGPoint point = [touch locationInView:self.rootView];
-                [self sendTouchPoint:point withEvent:ACTION_MOVE];
-            }
-            continue; // handle this in a different place
-        }
-        if (self.hotbarTouch != touch && [self isTouchInactive:self.primaryTouch]) {
-            // Replace the inactive touch with the current active touch
-            self.primaryTouch = touch;
-            [self sendTouchEvent:touch withUIEvent:event withEvent:ACTION_DOWN];
-        }
         [self sendTouchEvent:touch withUIEvent:event withEvent:ACTION_MOVE];
     }
 }
 
-// For ACTION_UP and ACTION_CANCEL
-- (void)touchesEndedGlobal:(NSSet *)touches withEvent:(UIEvent *)event
-{
+- (void)touchesEnded:(NSSet *)touches withEvent:(UIEvent *)event {
     for (UITouch *touch in touches) {
-        if (touch.type == UITouchTypeIndirectPointer) {
-            continue; // handle this in a different place
-        }
         [self sendTouchEvent:touch withUIEvent:event withEvent:ACTION_UP];
     }
 }
 
-// Equals to Android ACTION_UP
-- (void)touchesEnded:(NSSet *)touches withEvent:(UIEvent *)event
-{
-    [super touchesEnded:touches withEvent:event];
-    [self touchesEndedGlobal:touches withEvent:event];
-}
-
-// Equals to Android ACTION_CANCEL
-- (void)touchesCancelled:(NSSet *)touches withEvent:(UIEvent *)event
-{
-    [super touchesCancelled:touches withEvent:event];
-    [self touchesEndedGlobal:touches withEvent:event];
-}
-
-+ (BOOL)isRunning {
-    return [UIWindow.mainWindow.rootViewController isKindOfClass:SurfaceViewController.class];
-}
-
-+ (GameSurfaceView *)surface {
-    return pojavWindow;
+- (void)touchesCancelled:(NSSet *)touches withEvent:(UIEvent *)event {
+    for (UITouch *touch in touches) {
+        [self sendTouchEvent:touch withUIEvent:event withEvent:ACTION_UP];
+    }
 }
 
 @end
